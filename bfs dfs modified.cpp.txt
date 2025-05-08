@@ -1,0 +1,161 @@
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <stack>
+#include <omp.h>
+#include <chrono>
+using namespace std;
+using namespace chrono;
+
+const int MAX = 1000;
+vector<int> graph[MAX];
+bool visited[MAX];
+
+int n, m, start_node;
+
+// Sequential DFS
+void DFS_Sequential(int node) {
+    vector<bool> visited(n, false);
+    stack<int> s;
+    s.push(node);
+    while (!s.empty()) {
+        int curr = s.top(); s.pop();
+        if (!visited[curr]) {
+            visited[curr] = true;
+            cout << curr << " ";
+            for (int i = graph[curr].size() - 1; i >= 0; i--) {
+                int next = graph[curr][i];
+                if (!visited[next]) s.push(next);
+            }
+        }
+    }
+}
+
+// Parallel DFS using tasks
+void ParallelDFS(int node) {
+    #pragma omp critical
+    {
+        if (visited[node]) return;
+        visited[node] = true;
+        cout << node << " ";
+    }
+
+    #pragma omp parallel for
+    for (int i = 0; i < graph[node].size(); i++) {
+        int next = graph[node][i];
+        bool doVisit = false;
+
+        #pragma omp critical
+        {
+            if (!visited[next]) doVisit = true;
+        }
+
+        if (doVisit) {
+            #pragma omp task
+            ParallelDFS(next);
+        }
+    }
+
+    #pragma omp taskwait
+}
+
+// Sequential BFS
+void BFS_Sequential(int start) {
+    vector<bool> visited(n, false);
+    queue<int> q;
+    visited[start] = true;
+    q.push(start);
+    while (!q.empty()) {
+        int u = q.front(); q.pop();
+        cout << u << " ";
+        for (int v : graph[u]) {
+            if (!visited[v]) {
+                visited[v] = true;
+                q.push(v);
+            }
+        }
+    }
+}
+
+// Parallel BFS (level-order)
+void BFS_Parallel(int start) {
+    vector<bool> visited(n, false);
+    queue<int> q;
+    visited[start] = true;
+    q.push(start);
+
+    while (!q.empty()) {
+        int size = q.size();
+        vector<int> nextLevel;
+
+        #pragma omp parallel for
+        for (int i = 0; i < size; i++) {
+            int u;
+            #pragma omp critical
+            {
+                if (!q.empty()) {
+                    u = q.front(); q.pop();
+                    cout << u << " ";
+                }
+            }
+
+            for (int v : graph[u]) {
+                if (!visited[v]) {
+                    #pragma omp critical
+                    {
+                        if (!visited[v]) {
+                            visited[v] = true;
+                            nextLevel.push_back(v);
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int v : nextLevel)
+            q.push(v);
+    }
+}
+
+int main() {
+    cout << "Enter No of Nodes, Edges, and Start Node: ";
+    cin >> n >> m >> start_node;
+
+    cout << "Enter Edges (u v):\n";
+    for (int i = 0; i < m; i++) {
+        int u, v; cin >> u >> v;
+        graph[u].push_back(v);
+        graph[v].push_back(u);
+    }
+
+    cout << "\nSequential DFS: ";
+    auto t1 = high_resolution_clock::now();
+    DFS_Sequential(start_node);
+    auto t2 = high_resolution_clock::now();
+    cout << "\nTime: " << duration_cast<microseconds>(t2 - t1).count() << " µs\n";
+
+    fill(visited, visited + n, false);
+    cout << "\nParallel DFS: ";
+    auto t3 = high_resolution_clock::now();
+    #pragma omp parallel
+    {
+        #pragma omp single
+        ParallelDFS(start_node);
+    }
+    auto t4 = high_resolution_clock::now();
+    cout << "\nTime: " << duration_cast<microseconds>(t4 - t3).count() << " µs\n";
+
+    cout << "\nSequential BFS: ";
+    t1 = high_resolution_clock::now();
+    BFS_Sequential(start_node);
+    t2 = high_resolution_clock::now();
+    cout << "\nTime: " << duration_cast<microseconds>(t2 - t1).count() << " µs\n";
+
+    cout << "\nParallel BFS: ";
+    t3 = high_resolution_clock::now();
+    BFS_Parallel(start_node);
+    t4 = high_resolution_clock::now();
+    cout << "\nTime: " << duration_cast<microseconds>(t4 - t3).count() << " µs\n";
+
+    return 0;
+}
